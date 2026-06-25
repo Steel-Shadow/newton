@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass
 
 import numpy as np
 import warp as wp
@@ -18,6 +19,12 @@ RAMP_WIDTH = 0.9
 RAMP_THICKNESS = 0.12
 
 
+@dataclass
+class EditableBody:
+    label: str
+    body: int
+
+
 class Example:
     def __init__(self, viewer, args):
         self.fps = 100
@@ -30,7 +37,13 @@ class Example:
         self.args = args
 
         self.domino_body_indices: list[int] = []
+        self.editable_bodies: list[EditableBody] = []
+        self.selected_edit_index = 0
+        self.edit_position = [0.0, 0.0, 0.0]
+        self.edit_rotation_deg = [0.0, 0.0, 0.0]
+        self.zero_velocity_on_apply = False
         self.ball_body_index: int | None = None
+        self.ramp_body_index: int | None = None
 
         builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
 
@@ -58,6 +71,11 @@ class Example:
         self.state_1 = self.model.state()
         self.control = self.model.control()
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
+        newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_1)
+
+        self.initial_body_q = self.state_0.body_q.numpy().copy()
+        self.initial_body_qd = self.state_0.body_qd.numpy().copy()
+        self._load_edit_pose_from_state()
 
         self.contacts = self.collision_pipeline.contacts()
 
@@ -85,9 +103,13 @@ class Example:
         ramp_cfg.restitution = 0.05
 
         ramp_q = wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), self.ramp_angle)
-        builder.add_shape_box(
-            body=-1,
+        self.ramp_body_index = builder.add_body(
             xform=wp.transform(p=wp.vec3(self.ramp_center_x, 0.0, self.ramp_center_z), q=ramp_q),
+            label="inclined_ramp",
+            is_kinematic=True,
+        )
+        builder.add_shape_box(
+            body=self.ramp_body_index,
             hx=RAMP_LENGTH * 0.5,
             hy=RAMP_WIDTH * 0.5,
             hz=RAMP_THICKNESS * 0.5,
@@ -95,6 +117,7 @@ class Example:
             color=wp.vec3(0.78, 0.62, 0.36),
             label="inclined_ramp",
         )
+        self.editable_bodies.append(EditableBody("Ramp", self.ramp_body_index))
 
     def _add_ball(self, builder: newton.ModelBuilder, ball_speed: float, ramp_angle_deg: float) -> None:
         angle = math.radians(ramp_angle_deg)
@@ -119,6 +142,7 @@ class Example:
             color=wp.vec3(0.12, 0.42, 0.95),
             label="rolling_ball_shape",
         )
+        self.editable_bodies.append(EditableBody("Ball", self.ball_body_index))
 
         builder.body_qd[self.ball_body_index] = wp.spatial_vector(
             ball_speed * math.cos(angle),
@@ -155,6 +179,149 @@ class Example:
                 label=f"domino_{i:02d}_shape",
             )
             self.domino_body_indices.append(body)
+            self.editable_bodies.append(EditableBody(f"Domino {i:02d}", body))
+
+    @staticmethod
+    def _quat_to_rpy_deg(q_values) -> list[float]:
+        q = wp.quat(*q_values)
+        matrix = np.array(wp.quat_to_matrix(q), dtype=np.float32).reshape(3, 3)
+        roll = math.atan2(float(matrix[2, 1]), float(matrix[2, 2]))
+        pitch = math.atan2(
+            -float(matrix[2, 0]),
+            math.sqrt(float(matrix[2, 1]) ** 2 + float(matrix[2, 2]) ** 2),
+        )
+        yaw = math.atan2(float(matrix[1, 0]), float(matrix[0, 0]))
+        return [math.degrees(roll), math.degrees(pitch), math.degrees(yaw)]
+
+    @staticmethod
+    def _rpy_deg_to_quat(rotation_deg: list[float]) -> wp.quat:
+        roll, pitch, yaw = (math.radians(v) for v in rotation_deg)
+        return wp.quat_rpy(roll, pitch, yaw)
+
+    def _selected_editable_body(self) -> EditableBody:
+        self.selected_edit_index = min(max(self.selected_edit_index, 0), len(self.editable_bodies) - 1)
+        return self.editable_bodies[self.selected_edit_index]
+
+    def _load_edit_pose_from_state(self) -> None:
+        if not self.editable_bodies:
+            return
+        selected = self._selected_editable_body()
+        body_q = self.state_0.body_q.numpy()
+        pose = body_q[selected.body]
+        self.edit_position = [float(pose[0]), float(pose[1]), float(pose[2])]
+        self.edit_rotation_deg = self._quat_to_rpy_deg(pose[3:7])
+
+    def _sync_joint_coordinates(self) -> None:
+        newton.eval_ik(self.model, self.state_0, self.state_0.joint_q, self.state_0.joint_qd)
+        newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
+
+    def _refresh_contacts_after_edit(self) -> None:
+        self.contacts = self.model.collide(self.state_0, collision_pipeline=self.collision_pipeline)
+
+    def _apply_edit_pose(self) -> None:
+        selected = self._selected_editable_body()
+        q = self._rpy_deg_to_quat(self.edit_rotation_deg)
+
+        for state in (self.state_0, self.state_1):
+            body_q = state.body_q.numpy()
+            body_q[selected.body] = np.array(
+                [
+                    self.edit_position[0],
+                    self.edit_position[1],
+                    self.edit_position[2],
+                    float(q[0]),
+                    float(q[1]),
+                    float(q[2]),
+                    float(q[3]),
+                ],
+                dtype=body_q.dtype,
+            )
+            state.body_q.assign(body_q)
+
+            if self.zero_velocity_on_apply:
+                body_qd = state.body_qd.numpy()
+                body_qd[selected.body] = np.zeros(6, dtype=body_qd.dtype)
+                state.body_qd.assign(body_qd)
+
+        self._sync_joint_coordinates()
+        self._refresh_contacts_after_edit()
+        self.graph = None
+
+    def _restore_selected_body(self) -> None:
+        selected = self._selected_editable_body()
+        for state in (self.state_0, self.state_1):
+            body_q = state.body_q.numpy()
+            body_qd = state.body_qd.numpy()
+            body_q[selected.body] = self.initial_body_q[selected.body]
+            body_qd[selected.body] = self.initial_body_qd[selected.body]
+            state.body_q.assign(body_q)
+            state.body_qd.assign(body_qd)
+
+        self._sync_joint_coordinates()
+        self._load_edit_pose_from_state()
+        self._refresh_contacts_after_edit()
+        self.graph = None
+
+    def _restore_scene(self) -> None:
+        for state in (self.state_0, self.state_1):
+            state.body_q.assign(self.initial_body_q)
+            state.body_qd.assign(self.initial_body_qd)
+
+        self.sim_time = 0.0
+        self._sync_joint_coordinates()
+        self._load_edit_pose_from_state()
+        self._refresh_contacts_after_edit()
+        self.graph = None
+
+    def gui(self, ui):
+        paused = self.viewer.is_paused() if hasattr(self.viewer, "is_paused") else False
+
+        ui.text("Paused Object Editor")
+        if not paused:
+            ui.text("Pause the simulation before applying edits.")
+
+        labels = [body.label for body in self.editable_bodies]
+        changed, selected_index = ui.combo("Object", self.selected_edit_index, labels)
+        if changed:
+            self.selected_edit_index = selected_index
+            self._load_edit_pose_from_state()
+
+        ui.separator()
+        changed, self.edit_position[0] = ui.slider_float("X [m]", self.edit_position[0], -4.0, 6.0, "%.3f")
+        changed_y, self.edit_position[1] = ui.slider_float("Y [m]", self.edit_position[1], -2.0, 2.0, "%.3f")
+        changed_z, self.edit_position[2] = ui.slider_float("Z [m]", self.edit_position[2], 0.0, 3.0, "%.3f")
+        changed = changed or changed_y or changed_z
+
+        changed_roll, self.edit_rotation_deg[0] = ui.slider_float(
+            "Roll [deg]", self.edit_rotation_deg[0], -180.0, 180.0, "%.1f"
+        )
+        changed_pitch, self.edit_rotation_deg[1] = ui.slider_float(
+            "Pitch [deg]", self.edit_rotation_deg[1], -180.0, 180.0, "%.1f"
+        )
+        changed_yaw, self.edit_rotation_deg[2] = ui.slider_float(
+            "Yaw [deg]", self.edit_rotation_deg[2], -180.0, 180.0, "%.1f"
+        )
+        changed = changed or changed_roll or changed_pitch or changed_yaw
+
+        _changed, self.zero_velocity_on_apply = ui.checkbox("Zero velocity on apply", self.zero_velocity_on_apply)
+
+        if paused and changed:
+            self._apply_edit_pose()
+
+        if ui.button("Apply Pose"):
+            if paused:
+                self._apply_edit_pose()
+        ui.same_line()
+        if ui.button("Reload From Scene"):
+            self._load_edit_pose_from_state()
+
+        if ui.button("Restore Object"):
+            if paused:
+                self._restore_selected_body()
+        ui.same_line()
+        if ui.button("Restore Scene"):
+            if paused:
+                self._restore_scene()
 
     def capture(self):
         if wp.get_device().is_cuda:

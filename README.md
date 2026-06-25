@@ -1,31 +1,43 @@
-# Newton Rigid-Body Domino Experiment
+# Newton 刚体碰撞虚拟实验
 
-这是一个基于 Newton 物理引擎的刚体碰撞仿真实验。场景包含地面、斜面、小球和多米诺骨牌：小球沿斜面滚下，撞击第一块多米诺骨牌，并触发后续骨牌的链式倒下。
+这是一个基于 Newton 物理引擎的虚拟实验项目。当前场景包含地面、斜面、小球和多米诺骨牌：小球沿斜面滚下，撞击第一块多米诺骨牌，并触发链式倒下。
 
-当前实现使用 Newton 自带 viewer 进行可视化和调试，可作为后续接入 VR 显示、VR 交互或沉浸式实验界面的物理仿真核心。
+项目定位不是单纯播放一个预设动画，而是逐步做成一个可调参数、可交互、可记录实验结果的虚拟物理实验平台。最终展示可以是 Newton 自带交互 3D viewer、录屏视频，或进一步接入 VR 渲染环境。
 
-## 场景组成
+## 当前功能
 
-- 地面：静态平面，提供摩擦接触。
-- 斜面：静态倾斜 box，角度默认 `18 deg`。
-- 小球：动态刚体 sphere，带初始速度并受重力影响。
-- 多米诺骨牌：动态刚体 box，默认 `12` 块，中心间距 `0.36 m`。
-- 求解器：`newton.solvers.SolverXPBD`。
-- 碰撞管线：默认 broad phase 为 `sap`。
+- 地面、斜面、小球、多米诺骨牌刚体场景。
+- XPBD 刚体求解和 SAP 碰撞 broad phase。
+- 小球初速度、斜面角度、多米诺数量等命令行参数。
+- 自动测试链式反应是否发生。
+- 暂停编辑模式：暂停时可以选择斜面、小球或任意骨牌，直接平移和旋转物体。
+- 支持恢复单个物体或恢复整个场景到初始状态。
 
-## 运行方式
+## 运行
 
-在仓库根目录执行：
+在仓库根目录运行交互可视化：
 
 ```powershell
 uv run --extra examples python src\main.py
 ```
 
-如果只想无窗口验证物理过程和自动测试：
+无窗口验证：
 
 ```powershell
 uv run python src\main.py --viewer null --test --quiet
 ```
+
+## 交互编辑
+
+启动后打开 Newton viewer，使用左侧面板：
+
+1. 勾选 `Pause` 暂停仿真。
+2. 在 `Example Options` 里的 `Paused Object Editor` 选择对象。
+3. 调整 `X/Y/Z` 或 `Roll/Pitch/Yaw`。
+4. 暂停状态下滑条会立即应用到仿真状态。
+5. 可使用 `Restore Object` 恢复当前对象，或 `Restore Scene` 恢复整个实验。
+
+如果希望应用位姿时清空该物体速度，可勾选 `Zero velocity on apply`。
 
 ## 常用参数
 
@@ -42,19 +54,9 @@ uv run --extra examples python src\main.py --domino-count 16 --ball-speed 2.8 --
 - `--num-frames`：仿真帧数，默认 `320`。
 - `--viewer`：Newton viewer 类型，可用 `gl`、`null`、`usd` 等。
 
-## 代码结构
+## 主要物理参数
 
-- `Example.__init__()`：创建场景、模型、碰撞管线、求解器和 viewer。
-- `_add_ramp()`：添加固定斜面。
-- `_add_ball()`：添加小球并设置初始线速度和角速度。
-- `_add_dominoes()`：添加一排多米诺骨牌。
-- `simulate()`：执行碰撞检测和 XPBD 时间推进。
-- `render()`：把刚体状态和接触点写入 viewer。
-- `test_final()`：检查仿真状态有限，并确认有足够多的骨牌发生倾倒。
-
-## 物理参数
-
-主要几何常量位于 `src/main.py` 顶部：
+几何常量位于 `src/main.py` 顶部：
 
 ```python
 DOMINO_COUNT = 12
@@ -69,7 +71,7 @@ RAMP_WIDTH = 0.9
 RAMP_THICKNESS = 0.12
 ```
 
-如果多米诺太容易或太难连锁倒下，可以优先调整：
+如果链式反应太容易或太难触发，可以优先调整：
 
 - `DOMINO_SPACING`
 - `--ball-speed`
@@ -77,12 +79,12 @@ RAMP_THICKNESS = 0.12
 - 多米诺密度和摩擦参数
 - `--iterations`
 
-## VR 集成方向
+## 后续方向
 
-当前脚本负责物理仿真和 Newton viewer 可视化。后续接入 VR 时，可以保留 Newton 的模型构建和 `simulate()` 主循环，再把每帧的 `state_0.body_q` 刚体位姿同步到 VR 渲染层。
+推荐继续扩展为完整课程大作业：
 
-推荐的下一步：
-
-- 将小球、斜面、骨牌的位姿导出到 VR 渲染对象。
-- 用 VR 控制器添加重置、暂停、拖拽物体、改变斜面角度等交互。
-- 如果需要实验记录，可记录每帧刚体位姿、接触事件和骨牌倒下时间。
+- 增加实验数据记录，例如每块骨牌倒下时间、碰撞次数、实验是否成功。
+- 增加批量实验，扫描不同速度、角度、间距下的成功率。
+- 输出 CSV/JSON 和统计图表。
+- 支持添加或删除骨牌，并通过重建模型应用场景变化。
+- 将每帧刚体位姿导出给 Three.js、Unity 或 VR 渲染层。
