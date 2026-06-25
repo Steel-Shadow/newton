@@ -144,9 +144,11 @@ class Example:
             xform=wp.transform(p=wp.vec3(ball_x, 0.0, ball_z), q=wp.quat_identity()),
             label="rolling_ball",
         )
-        builder.add_shape_sphere(
+        builder.add_shape_ellipsoid(
             self.ball_body_index,
-            radius=BALL_RADIUS,
+            rx=BALL_RADIUS,
+            ry=BALL_RADIUS,
+            rz=BALL_RADIUS,
             cfg=ball_cfg,
             color=wp.vec3(0.12, 0.42, 0.95),
             label="rolling_ball_shape",
