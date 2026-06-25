@@ -1,15 +1,17 @@
 # Newton 刚体碰撞虚拟实验
 
-这是一个基于 Newton 物理引擎的虚拟实验项目。当前场景包含地面、斜面、小球和多米诺骨牌：小球沿斜面滚下，撞击第一块多米诺骨牌，并触发链式倒下。
+这是一个基于 Newton 物理引擎的虚拟实验项目。当前场景包含地面、斜面、小球和大量多米诺骨牌：小球沿斜面滚下，撞击入口骨牌，并触发链式倒下。骨牌可以生成直线、圆形、螺旋、波浪和混合展示图案，用于提升课程展示中的视觉效果。
 
 项目定位不是单纯播放一个预设动画，而是逐步做成一个可调参数、可交互、可记录实验结果的虚拟物理实验平台。最终展示可以是 Newton 自带交互 3D viewer、录屏视频，或进一步接入 VR 渲染环境。
 
 ## 当前功能
 
 - 地面、斜面、小球、多米诺骨牌刚体场景。
+- 默认 `96` 块骨牌，使用 `showcase` 混合布局：入口直线、圆形环和波浪尾迹。
+- 支持 `line`、`circle`、`spiral`、`wave`、`showcase` 多种骨牌图案。
 - XPBD 刚体求解和 SAP 碰撞 broad phase。
-- 小球初速度、斜面角度、多米诺数量等命令行参数。
-- 自动测试链式反应是否发生。
+- 小球初速度、斜面角度、骨牌数量、骨牌间距、图案尺度等命令行参数。
+- 自动测试入口链式反应是否发生。
 - 暂停编辑模式：暂停时可以选择斜面、小球或任意骨牌，直接平移和旋转物体。
 - 支持恢复单个物体或恢复整个场景到初始状态。
 
@@ -27,6 +29,32 @@ uv run --extra examples python src\main.py
 uv run python src\main.py --viewer null --test --quiet
 ```
 
+## 图案示例
+
+默认混合展示图案：
+
+```powershell
+uv run --extra examples python src\main.py --domino-pattern showcase --domino-count 120
+```
+
+圆形图案：
+
+```powershell
+uv run --extra examples python src\main.py --domino-pattern circle --domino-count 96
+```
+
+螺旋图案：
+
+```powershell
+uv run --extra examples python src\main.py --domino-pattern spiral --domino-count 120 --pattern-scale 1.2
+```
+
+波浪图案：
+
+```powershell
+uv run --extra examples python src\main.py --domino-pattern wave --domino-count 120
+```
+
 ## 交互编辑
 
 启动后打开 Newton viewer，使用左侧面板：
@@ -42,16 +70,19 @@ uv run python src\main.py --viewer null --test --quiet
 ## 常用参数
 
 ```powershell
-uv run --extra examples python src\main.py --domino-count 16 --ball-speed 2.8 --ramp-angle 20
+uv run --extra examples python src\main.py --domino-count 160 --domino-spacing 0.34 --ball-speed 2.8 --ramp-angle 20
 ```
 
 可调参数：
 
-- `--domino-count`：多米诺骨牌数量，默认 `12`。
+- `--domino-count`：骨牌总数量，默认 `96`。
+- `--domino-spacing`：沿生成路径相邻骨牌中心间距 `[m]`，默认 `0.36`。
+- `--domino-pattern`：骨牌图案，可选 `showcase`、`line`、`circle`、`spiral`、`wave`。
+- `--pattern-scale`：圆形、螺旋、波浪等图案的尺度系数，默认 `1.0`。
 - `--ball-speed`：小球沿斜面方向的初始速度 `[m/s]`，默认 `2.4`。
 - `--ramp-angle`：斜面角度 `[deg]`，默认 `18.0`。
 - `--iterations`：XPBD 每个 substep 的迭代次数，默认 `8`。
-- `--num-frames`：仿真帧数，默认 `320`。
+- `--num-frames`：仿真帧数，默认 `360`。
 - `--viewer`：Newton viewer 类型，可用 `gl`、`null`、`usd` 等。
 
 ## 主要物理参数
@@ -59,7 +90,7 @@ uv run --extra examples python src\main.py --domino-count 16 --ball-speed 2.8 --
 几何常量位于 `src/main.py` 顶部：
 
 ```python
-DOMINO_COUNT = 12
+DOMINO_COUNT = 96
 DOMINO_HALF_THICKNESS = 0.035
 DOMINO_HALF_WIDTH = 0.14
 DOMINO_HALF_HEIGHT = 0.40
@@ -73,9 +104,10 @@ RAMP_THICKNESS = 0.12
 
 如果链式反应太容易或太难触发，可以优先调整：
 
-- `DOMINO_SPACING`
+- `--domino-spacing`
 - `--ball-speed`
 - `--ramp-angle`
+- `--domino-pattern`
 - 多米诺密度和摩擦参数
 - `--iterations`
 
@@ -84,7 +116,7 @@ RAMP_THICKNESS = 0.12
 推荐继续扩展为完整课程大作业：
 
 - 增加实验数据记录，例如每块骨牌倒下时间、碰撞次数、实验是否成功。
-- 增加批量实验，扫描不同速度、角度、间距下的成功率。
+- 增加批量实验，扫描不同速度、角度、间距、图案下的成功率。
 - 输出 CSV/JSON 和统计图表。
 - 支持添加或删除骨牌，并通过重建模型应用场景变化。
 - 将每帧刚体位姿导出给 Three.js、Unity 或 VR 渲染层。

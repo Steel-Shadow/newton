@@ -7,7 +7,7 @@ import warp as wp
 import newton
 import newton.examples
 
-DOMINO_COUNT = 12
+DOMINO_COUNT = 96
 DOMINO_HALF_THICKNESS = 0.035
 DOMINO_HALF_WIDTH = 0.14
 DOMINO_HALF_HEIGHT = 0.40
@@ -25,6 +25,14 @@ class EditableBody:
     body: int
 
 
+@dataclass
+class DominoPlacement:
+    x: float
+    y: float
+    yaw: float
+    group: str = "pattern"
+
+
 class Example:
     def __init__(self, viewer, args):
         self.fps = 100
@@ -37,6 +45,7 @@ class Example:
         self.args = args
 
         self.domino_body_indices: list[int] = []
+        self.chain_body_indices: list[int] = []
         self.editable_bodies: list[EditableBody] = []
         self.selected_edit_index = 0
         self.edit_position = [0.0, 0.0, 0.0]
@@ -53,7 +62,7 @@ class Example:
 
         self._add_ramp(builder, args.ramp_angle)
         self._add_ball(builder, args.ball_speed, args.ramp_angle)
-        self._add_dominoes(builder, args.domino_count)
+        self._add_dominoes(builder, args)
 
         builder.joint_qd = np.array(builder.body_qd).flatten().tolist()
 
@@ -80,7 +89,7 @@ class Example:
         self.contacts = self.collision_pipeline.contacts()
 
         self.viewer.set_model(self.model)
-        self.viewer.set_camera(pos=wp.vec3(2.9, -4.6, 2.3), pitch=-22.0, yaw=148.0)
+        self._set_camera()
 
         self.capture()
 
@@ -153,19 +162,196 @@ class Example:
             0.0,
         )
 
-    def _add_dominoes(self, builder: newton.ModelBuilder, domino_count: int) -> None:
+    @staticmethod
+    def _line_placements(
+        count: int,
+        *,
+        start_x: float,
+        start_y: float,
+        spacing: float,
+        yaw: float = 0.0,
+        group: str = "entry",
+    ) -> list[DominoPlacement]:
+        direction = np.array([math.cos(yaw), math.sin(yaw)], dtype=float)
+        return [
+            DominoPlacement(
+                x=start_x + direction[0] * spacing * i,
+                y=start_y + direction[1] * spacing * i,
+                yaw=yaw,
+                group=group,
+            )
+            for i in range(count)
+        ]
+
+    @staticmethod
+    def _circle_placements(
+        count: int,
+        *,
+        center_x: float,
+        center_y: float,
+        radius: float,
+        start_angle: float = math.pi,
+        group: str = "circle",
+    ) -> list[DominoPlacement]:
+        if count <= 0:
+            return []
+
+        placements = []
+        for i in range(count):
+            angle = start_angle + 2.0 * math.pi * i / count
+            placements.append(
+                DominoPlacement(
+                    x=center_x + radius * math.cos(angle),
+                    y=center_y + radius * math.sin(angle),
+                    yaw=angle + math.pi * 0.5,
+                    group=group,
+                )
+            )
+        return placements
+
+    @staticmethod
+    def _wave_placements(
+        count: int,
+        *,
+        start_x: float,
+        start_y: float,
+        spacing: float,
+        amplitude: float,
+        wavelength: float,
+        group: str = "wave",
+    ) -> list[DominoPlacement]:
+        placements = []
+        for i in range(count):
+            x = start_x + spacing * i
+            phase = (x - start_x) / wavelength * 2.0 * math.pi
+            y = start_y + amplitude * math.sin(phase)
+            slope = amplitude * (2.0 * math.pi / wavelength) * math.cos(phase)
+            placements.append(DominoPlacement(x=x, y=y, yaw=math.atan2(slope, 1.0), group=group))
+        return placements
+
+    @staticmethod
+    def _spiral_placements(
+        count: int,
+        *,
+        center_x: float,
+        center_y: float,
+        spacing: float,
+        start_radius: float,
+        radial_step: float,
+        group: str = "spiral",
+    ) -> list[DominoPlacement]:
+        placements = []
+        radius = start_radius
+        angle = math.pi
+        for _ in range(count):
+            placements.append(
+                DominoPlacement(
+                    x=center_x + radius * math.cos(angle),
+                    y=center_y + radius * math.sin(angle),
+                    yaw=angle + math.pi * 0.5,
+                    group=group,
+                )
+            )
+            angle += spacing / max(radius, spacing)
+            radius += radial_step
+        return placements
+
+    def _build_domino_placements(self, args) -> list[DominoPlacement]:
+        count = max(1, args.domino_count)
+        spacing = args.domino_spacing
+        scale = args.pattern_scale
+        first_x = 0.75
+
+        if args.domino_pattern == "line":
+            return self._line_placements(count, start_x=first_x, start_y=0.0, spacing=spacing)
+
+        if args.domino_pattern == "wave":
+            return self._wave_placements(
+                count,
+                start_x=first_x,
+                start_y=0.0,
+                spacing=spacing,
+                amplitude=0.85 * scale,
+                wavelength=3.2 * scale,
+                group="entry",
+            )
+
+        entry_count = min(max(8, count // 6), count, 16)
+        entry = self._line_placements(count=entry_count, start_x=first_x, start_y=0.0, spacing=spacing, group="entry")
+        remaining = count - entry_count
+
+        if args.domino_pattern == "circle":
+            radius = max(1.0 * scale, remaining * spacing / (2.0 * math.pi))
+            center_x = first_x + (entry_count - 1) * spacing + spacing + radius
+            return entry + self._circle_placements(
+                remaining,
+                center_x=center_x,
+                center_y=0.0,
+                radius=radius,
+            )
+
+        if args.domino_pattern == "spiral":
+            center_x = first_x + (entry_count - 1) * spacing + 1.35 * scale
+            return entry + self._spiral_placements(
+                remaining,
+                center_x=center_x,
+                center_y=0.0,
+                spacing=spacing,
+                start_radius=0.55 * scale,
+                radial_step=0.018 * scale,
+            )
+
+        circle_count = min(max(20, count // 3), remaining)
+        wave_count = remaining - circle_count
+        radius = max(1.15 * scale, circle_count * spacing / (2.0 * math.pi))
+        circle_center_x = first_x + (entry_count - 1) * spacing + spacing + radius
+        circle = self._circle_placements(
+            circle_count,
+            center_x=circle_center_x,
+            center_y=0.0,
+            radius=radius,
+        )
+        wave_start_x = circle_center_x + radius + spacing
+        wave = self._wave_placements(
+            wave_count,
+            start_x=wave_start_x,
+            start_y=-0.85 * scale,
+            spacing=spacing,
+            amplitude=0.75 * scale,
+            wavelength=3.0 * scale,
+        )
+        return entry + circle + wave
+
+    @staticmethod
+    def _domino_color(index: int, total: int, group: str) -> wp.vec3:
+        if group == "entry":
+            return wp.vec3(0.92, 0.18, 0.12) if index == 0 else wp.vec3(0.98, 0.70, 0.18)
+        if group == "circle":
+            phase = 2.0 * math.pi * index / max(total, 1)
+            return wp.vec3(
+                0.45 + 0.35 * math.sin(phase),
+                0.50 + 0.30 * math.sin(phase + 2.1),
+                0.70 + 0.25 * math.sin(phase + 4.2),
+            )
+        if group == "spiral":
+            return wp.vec3(0.25, 0.75, 0.88)
+        return wp.vec3(0.72, 0.48, 0.95)
+
+    def _add_dominoes(self, builder: newton.ModelBuilder, args) -> None:
         domino_cfg = builder.default_shape_cfg.copy()
         domino_cfg.density = 250.0
         domino_cfg.mu = 0.9
         domino_cfg.restitution = 0.05
 
-        first_x = 0.75
-        for i in range(domino_count):
-            x = first_x + i * DOMINO_SPACING
+        placements = self._build_domino_placements(args)
+        self.domino_positions = np.array([[p.x, p.y] for p in placements], dtype=np.float32)
+
+        for i, placement in enumerate(placements):
+            yaw_q = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), placement.yaw)
             body = builder.add_body(
                 xform=wp.transform(
-                    p=wp.vec3(x, 0.0, DOMINO_HALF_HEIGHT),
-                    q=wp.quat_identity(),
+                    p=wp.vec3(placement.x, placement.y, DOMINO_HALF_HEIGHT),
+                    q=yaw_q,
                 ),
                 label=f"domino_{i:02d}",
             )
@@ -175,11 +361,28 @@ class Example:
                 hy=DOMINO_HALF_WIDTH,
                 hz=DOMINO_HALF_HEIGHT,
                 cfg=domino_cfg,
-                color=wp.vec3(0.92, 0.18, 0.12) if i == 0 else wp.vec3(0.95, 0.88, 0.68),
+                color=self._domino_color(i, len(placements), placement.group),
                 label=f"domino_{i:02d}_shape",
             )
             self.domino_body_indices.append(body)
+            if placement.group == "entry":
+                self.chain_body_indices.append(body)
             self.editable_bodies.append(EditableBody(f"Domino {i:02d}", body))
+
+    def _set_camera(self) -> None:
+        if len(self.domino_positions) == 0:
+            self.viewer.set_camera(pos=wp.vec3(2.9, -4.6, 2.3), pitch=-22.0, yaw=148.0)
+            return
+
+        mins = self.domino_positions.min(axis=0)
+        maxs = self.domino_positions.max(axis=0)
+        center = 0.5 * (mins + maxs)
+        span = float(max(maxs[0] - mins[0], maxs[1] - mins[1], 4.0))
+        self.viewer.set_camera(
+            pos=wp.vec3(float(center[0] + 0.35 * span), float(center[1] - 1.25 * span), max(2.6, 0.62 * span)),
+            pitch=-28.0,
+            yaw=138.0,
+        )
 
     @staticmethod
     def _quat_to_rpy_deg(q_values) -> list[float]:
@@ -360,22 +563,43 @@ class Example:
         if not np.isfinite(body_q).all() or not np.isfinite(body_qd).all():
             raise ValueError("Simulation produced non-finite rigid body state")
 
+        test_bodies = self.chain_body_indices or self.domino_body_indices
         tilted_count = 0
-        for body in self.domino_body_indices:
+        for body in test_bodies:
             q = wp.quat(*body_q[body][3:7])
             local_up = np.array(wp.quat_to_matrix(q), dtype=np.float32).reshape(3, 3)[:, 2]
             if abs(float(local_up[2])) < 0.85:
                 tilted_count += 1
 
-        if tilted_count < max(2, len(self.domino_body_indices) // 4):
+        required_tilted = max(2, len(test_bodies) // 4)
+        if tilted_count < required_tilted:
             raise ValueError(f"Only {tilted_count} dominoes tilted; expected a visible chain reaction")
 
     @staticmethod
     def create_parser():
         parser = newton.examples.create_parser()
         newton.examples.add_broad_phase_arg(parser)
-        parser.set_defaults(broad_phase="sap", num_frames=320)
-        parser.add_argument("--domino-count", type=int, default=DOMINO_COUNT, help="Number of dominoes in the row.")
+        parser.set_defaults(broad_phase="sap", num_frames=360)
+        parser.add_argument("--domino-count", type=int, default=DOMINO_COUNT, help="Total number of dominoes.")
+        parser.add_argument(
+            "--domino-spacing",
+            type=float,
+            default=DOMINO_SPACING,
+            help="Distance between neighboring domino centers along generated paths [m].",
+        )
+        parser.add_argument(
+            "--domino-pattern",
+            type=str,
+            default="showcase",
+            choices=["showcase", "line", "circle", "spiral", "wave"],
+            help="Domino layout pattern.",
+        )
+        parser.add_argument(
+            "--pattern-scale",
+            type=float,
+            default=1.0,
+            help="Scale factor for circular, spiral, and wave pattern dimensions.",
+        )
         parser.add_argument(
             "--ball-speed", type=float, default=2.4, help="Initial speed of the ball along the ramp [m/s]."
         )
