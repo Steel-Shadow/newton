@@ -7,11 +7,12 @@
 ## 当前功能
 
 - 地面、斜面、小球、多米诺骨牌刚体场景。
-- 默认 `96` 块骨牌，使用 `showcase` 混合布局：入口直线、圆形环和波浪尾迹。
+- 默认 `96` 块骨牌，使用 `showcase` 混合布局：入口直线和带入口缺口的圆形环。
+- 小球和入口骨牌之间加入软体缓冲块，用于展示不同柔软度和阻尼对碰撞传递的影响。
 - 支持 `line`、`circle`、`spiral`、`wave`、`showcase` 多种骨牌图案。
 - XPBD 刚体求解和 SAP 碰撞 broad phase。
-- 小球初速度、斜面角度、骨牌数量、骨牌间距、图案尺度等命令行参数。
-- 自动测试入口链式反应是否发生。
+- 小球初速度、斜面角度、骨牌数量、骨牌间距、图案尺度、软体材料参数等命令行参数。
+- 自动测试入口和圆环链式反应是否发生。
 - 暂停编辑模式：暂停时可以选择斜面、小球或任意骨牌，直接平移和旋转物体。
 - 支持恢复单个物体或恢复整个场景到初始状态。
 
@@ -55,6 +56,28 @@ uv run --extra examples python src\main.py --domino-pattern spiral --domino-coun
 uv run --extra examples python src\main.py --domino-pattern wave --domino-count 120
 ```
 
+## 柔软度实验
+
+默认场景会启用一个自由软体缓冲块。它位于小球和第一张骨牌之间，小球先压缩并推动缓冲块，再由缓冲块把动量传给骨牌。可以通过材料刚度和阻尼观察链式反应是否被削弱。
+
+较硬的软橡胶：
+
+```powershell
+uv run --extra examples python src\main.py --soft-k-mu 30000 --soft-k-lambda 100000 --soft-damping 0.8
+```
+
+更软、更吸能的材料：
+
+```powershell
+uv run --extra examples python src\main.py --soft-k-mu 5000 --soft-k-lambda 25000 --soft-damping 6.0
+```
+
+关闭软体缓冲块，回到纯刚体链式碰撞：
+
+```powershell
+uv run --extra examples python src\main.py --disable-soft-buffer
+```
+
 ## 交互编辑
 
 启动后打开 Newton viewer，使用左侧面板：
@@ -79,10 +102,17 @@ uv run --extra examples python src\main.py --domino-count 160 --domino-spacing 0
 - `--domino-spacing`：沿生成路径相邻骨牌中心间距 `[m]`，默认 `0.36`。
 - `--domino-pattern`：骨牌图案，可选 `showcase`、`line`、`circle`、`spiral`、`wave`。
 - `--pattern-scale`：圆形、螺旋、波浪等图案的尺度系数，默认 `1.0`。
-- `--ball-speed`：小球沿斜面方向的初始速度 `[m/s]`，默认 `2.4`。
+- `--ball-speed`：小球沿斜面方向的初始速度 `[m/s]`，默认 `2.6`。
 - `--ramp-angle`：斜面角度 `[deg]`，默认 `18.0`。
 - `--iterations`：XPBD 每个 substep 的迭代次数，默认 `8`。
-- `--num-frames`：仿真帧数，默认 `360`。
+- `--sim-substeps`：每帧物理子步数，默认 `16`。提高该值会更稳定但降低 FPS。
+- `--disable-soft-buffer`：关闭小球和入口骨牌之间的软体缓冲块。
+- `--soft-density`：软体缓冲块密度 `[kg/m^3]`，默认 `100.0`。
+- `--soft-k-mu`：软体剪切刚度，默认 `10000`。
+- `--soft-k-lambda`：软体体积保持刚度，默认 `50000`。
+- `--soft-damping`：软体材料阻尼，默认 `1.0`。
+- `--soft-contact-margin`：刚体-软体接触生成距离 `[m]`，默认 `0.01`。
+- `--num-frames`：仿真帧数，默认 `600`。
 - `--viewer`：Newton viewer 类型，可用 `gl`、`null`、`usd` 等。
 
 ## 主要物理参数
@@ -97,9 +127,16 @@ DOMINO_HALF_HEIGHT = 0.40
 DOMINO_SPACING = 0.36
 
 BALL_RADIUS = 0.18
+BALL_DENSITY = 350.0
 RAMP_LENGTH = 3.8
 RAMP_WIDTH = 0.9
 RAMP_THICKNESS = 0.12
+
+SOFT_BUFFER_DENSITY = 100.0
+SOFT_BUFFER_K_MU = 1.0e4
+SOFT_BUFFER_K_LAMBDA = 5.0e4
+SOFT_BUFFER_K_DAMP = 1.0
+SOFT_BUFFER_CONTACT_CLEARANCE = 0.03
 ```
 
 如果链式反应太容易或太难触发，可以优先调整：
@@ -108,6 +145,9 @@ RAMP_THICKNESS = 0.12
 - `--ball-speed`
 - `--ramp-angle`
 - `--domino-pattern`
+- `--soft-k-mu`
+- `--soft-k-lambda`
+- `--soft-damping`
 - 多米诺密度和摩擦参数
 - `--iterations`
 
