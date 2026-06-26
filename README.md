@@ -7,7 +7,8 @@
 ## 当前功能
 
 - 地面、斜面、小球、多米诺骨牌刚体场景。
-- 默认 `96` 块骨牌，使用 `showcase` 混合布局：入口直线和带入口缺口的圆形环。
+- 默认目标 `96` 块骨牌，使用 `showcase` 混合布局：入口直线和带入口缺口的紧凑圆形环。
+- 在圆环转过约 `180°` 的位置放置由小方块组成的金字塔，并自动让出局部圆环空间，使骨牌正对金字塔第一行中心方块。
 - 小球和入口骨牌之间加入软体缓冲块，用于展示不同柔软度和阻尼对碰撞传递的影响。
 - 支持 `line`、`circle`、`spiral`、`wave`、`showcase` 多种骨牌图案。
 - XPBD 刚体求解和 SAP 碰撞 broad phase。
@@ -98,10 +99,13 @@ uv run --extra examples python src\main.py --domino-count 160 --domino-spacing 0
 
 可调参数：
 
-- `--domino-count`：骨牌总数量，默认 `96`。
+- `--domino-count`：骨牌目标数量，默认 `96`。圆环半径默认缩短为原始布局的 `1/2`，实际圆环骨牌数会按间距自动裁剪；启用金字塔时还会移除少量重叠风险较高的圆环骨牌。
 - `--domino-spacing`：沿生成路径相邻骨牌中心间距 `[m]`，默认 `0.36`。
 - `--domino-pattern`：骨牌图案，可选 `showcase`、`line`、`circle`、`spiral`、`wave`。
 - `--pattern-scale`：圆形、螺旋、波浪等图案的尺度系数，默认 `1.0`。
+- `--disable-pyramid`：关闭圆环半程位置的方块金字塔。
+- `--pyramid-size`：金字塔层数，默认 `13`，使用奇数层以保证第一行存在中心方块。
+- `--pyramid-gap`：半程骨牌和金字塔第一行中心方块之间的间隙 `[m]`，默认 `0.16`。
 - `--ball-speed`：小球沿斜面方向的初始速度 `[m/s]`，默认 `2.6`。
 - `--ramp-angle`：斜面角度 `[deg]`，默认 `18.0`。
 - `--iterations`：XPBD 每个 substep 的迭代次数，默认 `8`。
@@ -125,6 +129,13 @@ DOMINO_HALF_THICKNESS = 0.035
 DOMINO_HALF_WIDTH = 0.14
 DOMINO_HALF_HEIGHT = 0.40
 DOMINO_SPACING = 0.36
+DOMINO_CIRCLE_RADIUS_SCALE = 0.5
+
+PYRAMID_SIZE = 13
+PYRAMID_CUBE_HALF = 0.14 / 3.0
+PYRAMID_CUBE_SPACING = 2.1 * PYRAMID_CUBE_HALF
+PYRAMID_CUBE_VERTICAL_SPACING = 2.01 * PYRAMID_CUBE_HALF
+PYRAMID_GAP_TO_DOMINO = 0.16
 
 BALL_RADIUS = 0.18
 BALL_DENSITY = 350.0

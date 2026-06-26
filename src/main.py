@@ -14,7 +14,14 @@ DOMINO_HALF_HEIGHT = 0.40
 DOMINO_SPACING = 0.36
 DOMINO_CIRCLE_ENTRY_ANGLE = -0.5 * math.pi
 DOMINO_CIRCLE_ENTRY_GAP = 5.0
+DOMINO_CIRCLE_RADIUS_SCALE = 0.5
 FIRST_DOMINO_X = 0.75
+
+PYRAMID_SIZE = 13
+PYRAMID_CUBE_HALF = 0.14 / 3.0
+PYRAMID_CUBE_SPACING = 2.1 * PYRAMID_CUBE_HALF
+PYRAMID_CUBE_VERTICAL_SPACING = 2.01 * PYRAMID_CUBE_HALF
+PYRAMID_GAP_TO_DOMINO = 0.16
 
 BALL_RADIUS = 0.18
 BALL_DENSITY = 350.0
@@ -65,6 +72,10 @@ class Example:
 
         self.domino_body_indices: list[int] = []
         self.chain_body_indices: list[int] = []
+        self.pyramid_body_indices: list[int] = []
+        self.domino_placements: list[DominoPlacement] = []
+        self.pyramid_anchor: DominoPlacement | None = None
+        self.pyramid_positions = np.empty((0, 2), dtype=np.float32)
         self.editable_bodies: list[EditableBody] = []
         self.selected_edit_index = 0
         self.edit_position = [0.0, 0.0, 0.0]
@@ -87,6 +98,8 @@ class Example:
         if not args.disable_soft_buffer:
             self._add_soft_buffer(builder, args)
         self._add_dominoes(builder, args)
+        if not args.disable_pyramid:
+            self._add_pyramid(builder, args)
 
         builder.joint_qd = np.array(builder.body_qd).flatten().tolist()
 
@@ -287,6 +300,17 @@ class Example:
         return placements
 
     @staticmethod
+    def _scaled_circle_radius(count: int, spacing: float, gap: float, min_radius: float) -> float:
+        base_radius = max(min_radius, ((count - 1) * spacing + gap) / (2.0 * math.pi))
+        return max(min_radius, base_radius * DOMINO_CIRCLE_RADIUS_SCALE)
+
+    @staticmethod
+    def _circle_count_for_radius(count: int, spacing: float, gap: float, radius: float) -> int:
+        usable_arc = max(0.0, 2.0 * math.pi * radius - gap)
+        max_count = max(1, int(math.floor(usable_arc / spacing)) + 1)
+        return min(count, max_count)
+
+    @staticmethod
     def _wave_placements(
         count: int,
         *,
@@ -360,7 +384,8 @@ class Example:
         circle_gap = DOMINO_CIRCLE_ENTRY_GAP * spacing
 
         if args.domino_pattern == "circle":
-            radius = max(1.0 * scale, ((remaining - 1) * spacing + circle_gap) / (2.0 * math.pi))
+            radius = self._scaled_circle_radius(remaining, spacing, circle_gap, 1.0 * scale)
+            remaining = self._circle_count_for_radius(remaining, spacing, circle_gap, radius)
             sweep_angle = 2.0 * math.pi - circle_gap / radius
             center_x = entry_end_x + spacing
             return entry + self._circle_placements(
@@ -383,8 +408,8 @@ class Example:
                 radial_step=0.018 * scale,
             )
 
-        circle_count = remaining
-        radius = max(1.15 * scale, ((circle_count - 1) * spacing + circle_gap) / (2.0 * math.pi))
+        radius = self._scaled_circle_radius(remaining, spacing, circle_gap, 1.15 * scale)
+        circle_count = self._circle_count_for_radius(remaining, spacing, circle_gap, radius)
         sweep_angle = 2.0 * math.pi - circle_gap / radius
         circle_center_x = entry_end_x + spacing
         circle_center_y = radius
@@ -413,6 +438,58 @@ class Example:
             return wp.vec3(0.25, 0.75, 0.88)
         return wp.vec3(0.72, 0.48, 0.95)
 
+    @staticmethod
+    def _pyramid_anchor_from_placements(placements: list[DominoPlacement]) -> DominoPlacement | None:
+        circle = [placement for placement in placements if placement.group == "circle"]
+        if not circle:
+            return None
+        return circle[len(circle) // 2]
+
+    @staticmethod
+    def _pyramid_block_layout(anchor: DominoPlacement, pyramid_size: int, gap: float) -> list[tuple[np.ndarray, float]]:
+        tangent = np.array([math.cos(anchor.yaw), math.sin(anchor.yaw)], dtype=float)
+        outward = np.array([tangent[1], -tangent[0]], dtype=float)
+        row_center_xy = np.array([anchor.x, anchor.y], dtype=float) + tangent * (
+            DOMINO_HALF_THICKNESS + PYRAMID_CUBE_HALF + gap
+        )
+
+        blocks = []
+        for level in range(pyramid_size):
+            cube_count = pyramid_size - level
+            row_width = (cube_count - 1) * PYRAMID_CUBE_SPACING
+            offsets = [-0.5 * row_width + i * PYRAMID_CUBE_SPACING for i in range(cube_count)]
+            for offset in sorted(offsets, key=lambda value: (abs(value), value)):
+                xy = row_center_xy + outward * offset
+                z = level * PYRAMID_CUBE_VERTICAL_SPACING + PYRAMID_CUBE_HALF
+                blocks.append((xy, z))
+        return blocks
+
+    def _filter_pyramid_overlap_placements(
+        self,
+        placements: list[DominoPlacement],
+        args,
+    ) -> list[DominoPlacement]:
+        if self.pyramid_anchor is None:
+            return placements
+
+        blocks = self._pyramid_block_layout(
+            self.pyramid_anchor,
+            max(1, args.pyramid_size),
+            args.pyramid_gap,
+        )
+        block_xy = np.array([xy for xy, _z in blocks], dtype=np.float32)
+        clearance = PYRAMID_CUBE_HALF + DOMINO_HALF_WIDTH + 0.04
+
+        filtered = []
+        for placement in placements:
+            if placement.group != "circle":
+                filtered.append(placement)
+                continue
+            delta = block_xy - np.array([placement.x, placement.y], dtype=np.float32)
+            if np.min(np.linalg.norm(delta, axis=1)) >= clearance:
+                filtered.append(placement)
+        return filtered
+
     def _add_dominoes(self, builder: newton.ModelBuilder, args) -> None:
         domino_cfg = builder.default_shape_cfg.copy()
         domino_cfg.density = 250.0
@@ -420,6 +497,10 @@ class Example:
         domino_cfg.restitution = 0.05
 
         placements = self._build_domino_placements(args)
+        if not args.disable_pyramid:
+            self.pyramid_anchor = self._pyramid_anchor_from_placements(placements)
+            placements = self._filter_pyramid_overlap_placements(placements, args)
+        self.domino_placements = placements
         self.domino_positions = np.array([[p.x, p.y] for p in placements], dtype=np.float32)
 
         for i, placement in enumerate(placements):
@@ -447,13 +528,56 @@ class Example:
                 self.chain_body_indices.append(body)
             self.editable_bodies.append(EditableBody(f"Domino {i:02d}", body))
 
+    def _add_pyramid(self, builder: newton.ModelBuilder, args) -> None:
+        if self.pyramid_anchor is None:
+            self.pyramid_positions = np.empty((0, 2), dtype=np.float32)
+            return
+
+        pyramid_size = max(1, args.pyramid_size)
+
+        pyramid_cfg = builder.default_shape_cfg.copy()
+        pyramid_cfg.density = 450.0
+        pyramid_cfg.mu = 0.85
+        pyramid_cfg.restitution = 0.04
+        pyramid_cfg.has_particle_collision = False
+
+        pyramid_q = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), self.pyramid_anchor.yaw)
+        positions = []
+        for xy, z in self._pyramid_block_layout(self.pyramid_anchor, pyramid_size, args.pyramid_gap):
+            body = builder.add_body(
+                xform=wp.transform(
+                    p=wp.vec3(float(xy[0]), float(xy[1]), z),
+                    q=pyramid_q,
+                ),
+                label=f"pyramid_{len(self.pyramid_body_indices):02d}",
+            )
+            builder.add_shape_box(
+                body,
+                hx=PYRAMID_CUBE_HALF,
+                hy=PYRAMID_CUBE_HALF,
+                hz=PYRAMID_CUBE_HALF,
+                cfg=pyramid_cfg,
+                color=wp.vec3(0.62, 0.68, 0.74),
+                label=f"pyramid_{len(self.pyramid_body_indices):02d}_shape",
+            )
+            self.pyramid_body_indices.append(body)
+            positions.append([float(xy[0]), float(xy[1])])
+            self.editable_bodies.append(EditableBody(f"Pyramid {len(self.pyramid_body_indices) - 1:02d}", body))
+
+        self.pyramid_positions = np.array(positions, dtype=np.float32)
+
     def _set_camera(self) -> None:
-        if len(self.domino_positions) == 0:
+        positions = [self.domino_positions]
+        if len(self.pyramid_positions) > 0:
+            positions.append(self.pyramid_positions)
+        scene_positions = np.vstack(positions) if positions else np.empty((0, 2), dtype=np.float32)
+
+        if len(scene_positions) == 0:
             self.viewer.set_camera(pos=wp.vec3(2.9, -4.6, 2.3), pitch=-22.0, yaw=148.0)
             return
 
-        mins = self.domino_positions.min(axis=0)
-        maxs = self.domino_positions.max(axis=0)
+        mins = scene_positions.min(axis=0)
+        maxs = scene_positions.max(axis=0)
         center = 0.5 * (mins + maxs)
         span = float(max(maxs[0] - mins[0], maxs[1] - mins[1], 4.0))
         self.viewer.set_camera(
@@ -693,6 +817,23 @@ class Example:
             type=float,
             default=1.0,
             help="Scale factor for circular, spiral, and wave pattern dimensions.",
+        )
+        parser.add_argument(
+            "--disable-pyramid",
+            action="store_true",
+            help="Disable the box pyramid placed near the half-turn point of the domino circle.",
+        )
+        parser.add_argument(
+            "--pyramid-size",
+            type=int,
+            default=PYRAMID_SIZE,
+            help="Number of rows in the box pyramid.",
+        )
+        parser.add_argument(
+            "--pyramid-gap",
+            type=float,
+            default=PYRAMID_GAP_TO_DOMINO,
+            help="Gap between the half-turn domino and the first pyramid cube [m].",
         )
         parser.add_argument(
             "--ball-speed", type=float, default=2.6, help="Initial speed of the ball along the ramp [m/s]."
