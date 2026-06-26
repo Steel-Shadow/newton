@@ -57,6 +57,16 @@ uv run --extra examples python src\main.py --domino-pattern spiral --domino-coun
 uv run --extra examples python src\main.py --domino-pattern wave --domino-count 120
 ```
 
+## 视频导出
+
+导出 20 秒 MP4 视频：
+
+```powershell
+uv run --extra examples --with imageio --with imageio-ffmpeg python scripts\export_video.py --video-duration 20 --video-fps 30 --video-output outputs\newton_experiment.mp4
+```
+
+导出脚本默认使用 `action` 镜头：围绕多米诺圆环和金字塔这条主要动作线构图，然后重置场景并开始录制。若需要调试全模型视角，可加 `--camera-mode frame`；若希望更近，可降低 `--camera-padding`，例如 `--camera-padding 0.85`。视频导出产物默认放在 `outputs/`，该目录不会进入 git。
+
 ## 柔软度实验
 
 默认场景会启用一个自由软体缓冲块。它位于小球和第一张骨牌之间，小球先压缩并推动缓冲块，再由缓冲块把动量传给骨牌。可以通过材料刚度和阻尼观察链式反应是否被削弱。
@@ -106,6 +116,7 @@ uv run --extra examples python src\main.py --domino-count 160 --domino-spacing 0
 - `--disable-pyramid`：关闭圆环半程位置的方块金字塔。
 - `--pyramid-size`：金字塔层数，默认 `13`，使用奇数层以保证第一行存在中心方块。
 - `--pyramid-gap`：半程骨牌和金字塔第一行中心方块之间的间隙 `[m]`，默认 `0.16`。
+- `--pyramid-density`：金字塔方块密度 `[kg/m^3]`，默认 `120.0`。增大该值会让金字塔更难被骨牌推倒。
 - `--ball-speed`：小球沿斜面方向的初始速度 `[m/s]`，默认 `2.6`。
 - `--ramp-angle`：斜面角度 `[deg]`，默认 `18.0`。
 - `--iterations`：XPBD 每个 substep 的迭代次数，默认 `8`。
@@ -136,6 +147,7 @@ PYRAMID_CUBE_HALF = 0.14 / 3.0
 PYRAMID_CUBE_SPACING = 2.1 * PYRAMID_CUBE_HALF
 PYRAMID_CUBE_VERTICAL_SPACING = 2.01 * PYRAMID_CUBE_HALF
 PYRAMID_GAP_TO_DOMINO = 0.16
+PYRAMID_DENSITY = 120.0
 
 BALL_RADIUS = 0.18
 BALL_DENSITY = 350.0

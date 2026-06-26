@@ -22,6 +22,7 @@ PYRAMID_CUBE_HALF = 0.14 / 3.0
 PYRAMID_CUBE_SPACING = 2.1 * PYRAMID_CUBE_HALF
 PYRAMID_CUBE_VERTICAL_SPACING = 2.01 * PYRAMID_CUBE_HALF
 PYRAMID_GAP_TO_DOMINO = 0.16
+PYRAMID_DENSITY = 120.0
 
 BALL_RADIUS = 0.18
 BALL_DENSITY = 350.0
@@ -536,7 +537,7 @@ class Example:
         pyramid_size = max(1, args.pyramid_size)
 
         pyramid_cfg = builder.default_shape_cfg.copy()
-        pyramid_cfg.density = 450.0
+        pyramid_cfg.density = args.pyramid_density
         pyramid_cfg.mu = 0.85
         pyramid_cfg.restitution = 0.04
         pyramid_cfg.has_particle_collision = False
@@ -834,6 +835,12 @@ class Example:
             type=float,
             default=PYRAMID_GAP_TO_DOMINO,
             help="Gap between the half-turn domino and the first pyramid cube [m].",
+        )
+        parser.add_argument(
+            "--pyramid-density",
+            type=float,
+            default=PYRAMID_DENSITY,
+            help="Density of each pyramid cube [kg/m^3]. Lower values collapse faster.",
         )
         parser.add_argument(
             "--ball-speed", type=float, default=2.6, help="Initial speed of the ball along the ramp [m/s]."
